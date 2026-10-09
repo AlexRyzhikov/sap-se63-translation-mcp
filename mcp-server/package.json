@@ -1,0 +1,40 @@
+{
+  "name": "sap-se63-translation-mcp",
+  "version": "0.1.0",
+  "description": "MCP server to translate SAP objects (CDS, Fiori/UI5, DDIC, messages, text pools) with Claude via the SE63 / LXE API",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "sap-se63-translation-mcp": "dist/index.js",
+    "sap-se63-translation-setup": "dist/setup.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "setup": "node dist/setup.js",
+    "start": "node dist/index.js",
+    "test": "npm run build && node test/e2e.mjs && node test/setup.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "undici": "^6.29.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  },
+  "license": "MIT",
+  "keywords": [
+    "sap",
+    "abap",
+    "se63",
+    "translation",
+    "mcp",
+    "claude",
+    "fiori",
+    "cds"
+  ]
+}
