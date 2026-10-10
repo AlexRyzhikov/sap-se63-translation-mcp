@@ -156,4 +156,14 @@ assert.equal(checkProposal(base, "Price element").text, "Price element");
 assert.equal(checkProposal({ ...base, uppcase: "", source: "ORDER TYPE" }, "Auftragsart").text, "AUFTRAGSART");
 console.log("upper-case regression: ok");
 
+// SAPscript paragraphs (SE71/SO10): no max length, symbols / formats / tabs must stay
+const scr = { max_len: 0, uppcase: "", source: "Delivery &VBDKL-VBELN& from <B>&VBDKL-LFDAT&</>,,Page &PAGE(3)&" };
+const okScr = checkProposal(scr, "Lieferung &VBDKL-VBELN& vom <B>&VBDKL-LFDAT&</>,,Seite &PAGE(3)&");
+assert.ok(okScr.ok);
+assert.deepEqual(okScr.warnings, []);
+const lostSym = checkProposal(scr, "Lieferung &VBDKL-VBELN& vom <B>&VBDKL-LFDAT&,,Seite");
+assert.ok(lostSym.warnings.some((w) => w.startsWith("placeholders differ")));
+assert.ok(checkProposal(scr, "x".repeat(500)).ok, "long text paragraphs have no max length");
+console.log("sapscript placeholder check: ok");
+
 console.log("\nALL TESTS PASSED");

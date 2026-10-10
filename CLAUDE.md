@@ -40,7 +40,7 @@ When the user asks you to **install** it, follow these steps exactly.
 8. **Finish:** tell the user to quit Claude Desktop completely and restart it, then say *"Ping SAP"*.
    For Claude Code: `claude mcp add sap-se63-translation -- "$(which node)" "$PWD/dist/index.js"`.
 
-The **SAP side** (3 ABAP classes + 1 SICF node) is described in `abap/SETUP.md`.
+The **SAP side** (4 ABAP classes + 1 SICF node) is described in `abap/SETUP.md`.
 Ask the user whether it is already installed before debugging connection errors.
 
 ## Using the tools (translation work)
@@ -51,9 +51,15 @@ Ask the user whether it is already installed before debugging connection errors.
 - Respect `max_len`; keep placeholders (`&1 & {0} %s`); keep device/product names unchanged.
 - Skip generated objects (table maintenance function groups) and technical names (entity set names, `+`).
 - Use SAP standard terminology of the target language (e.g. DE Werk/Charge, RU Завод/Партия).
+- SE71 form = object `FORM`, SO10 text = object `TEXT` (name `ZTEXT` or `ZTEXT,ST`). One item = one paragraph,
+  `max_len` 0. Keep `&SYMBOLS&`, `<B>…</>` and `,,` exactly. SAP standard forms are often only in client 000.
+  SO10 texts have no package: always ask whether to write with a transport (`R3TR TEXT`) or without.
+  If the source paragraph looks cut (words glued together), tell the user before writing.
+- Adobe forms (`SFPF`): only form/interface texts (`TLGS`); layout texts (`PDFB`) are not supported.
 
 ## Development
 
 - `mcp-server/src/index.ts` – MCP tools; `sapClient.ts` – HTTP client; `worklist.ts` – files + checks;
   `setup.ts` – setup wizard; `config.ts` – .env + password lookup.
-- `abap/src` – abapGit format. Keep `npm test` green.
+- `abap/src` – abapGit format. `zcl_mcp_transl_api` = LXE/SE63 + routing, `zcl_mcp_transl_sapscript` =
+  SE71/SO10 (split into paragraphs → wrap to 132 chars). Activate both together. Keep `npm test` green.

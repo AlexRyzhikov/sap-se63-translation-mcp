@@ -104,7 +104,9 @@ export function buildWorklist(system: string, scope: Scope, targetLang: string, 
 
 /* ---------- Checks for a proposed translation ---------- */
 
-const PLACEHOLDER = /&\d|&[A-Z0-9_]+&|\{\d+\}|%[sd]|&(?=\s|$|[.,:;!?)])/g;
+// &1 &2 · symbols &VAR& / SAPscript &VBDKA-VBELN& &PAGE(3)& · {0} · %s · lone &
+// SAPscript: character formats <B> </> <H1> and tab ,,
+const PLACEHOLDER = /&\d|&[^&\s]{1,80}&|\{\d+\}|%[sd]|<\/?[A-Z0-9]{0,2}>|,,|&(?=\s|$|[.,:;!?)])/g;
 
 function placeholders(s: string): string[] {
   return (s.match(PLACEHOLDER) ?? []).sort();

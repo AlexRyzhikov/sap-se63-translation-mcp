@@ -1,19 +1,21 @@
 # SAP SE63 Translation MCP Server
 
 Translate SAP development objects – CDS views, metadata extensions, Fiori/UI5 apps,
-data elements, messages, text pools, service definitions … – **with Claude**, through
+data elements, messages, text pools, service definitions, SE71 forms, SO10 texts … – **with Claude**, through
 the same API that transaction **SE63** uses.
 
 ```
 Claude ──MCP (stdio)──► mcp-server (Node)  ──HTTPS/JSON──►  /sap/bc/zmcp_transl
                               │                              ZCL_MCP_TRANSL_HTTP
                               ▼                              ZCL_MCP_TRANSL_API ──► LXE_* (SE63 API)
-                    worklists/*.json + *.csv (Excel)
+                    worklists/*.json + *.csv (Excel)          ZCL_MCP_TRANSL_SAPSCRIPT ──► SE71 / SO10
 ```
 
 SE63 is a SAP GUI transaction, but internally it only calls the `LXE_*` function
-modules (`LXE_OBJ_TEXT_PAIR_READ/WRITE`, …). Three small ABAP classes expose exactly
-these calls as JSON. Claude does the translating itself – no DeepL or other API key.
+modules (`LXE_OBJ_TEXT_PAIR_READ/WRITE`, …). Small ABAP classes expose exactly
+these calls as JSON. SAPscript long texts (SE71 forms, SO10 standard texts) are not
+text pairs – a fourth class reads/writes them with `READ_FORM`/`SAVE_FORM` and
+`READ_TEXT`/`SAVE_TEXT`, one paragraph per worklist item. Claude does the translating itself – no DeepL or other API key.
 Every call runs with **your** SAP user, so authorizations, change log and transport
 work as in SE63.
 
@@ -60,8 +62,8 @@ Claude Code instead of Desktop: `claude mcp add sap-se63-translation -- node /pa
 ### SAP side (once per system)
 
 1. **ABAP classes** – with [abapGit](https://abapgit.org): *New Online* → this repo →
-   package of your choice (e.g. `ZMCP_TRANSLATION`) → *Pull*. Or create the three
-   classes from [`abap/src`](abap/src) manually in ADT.
+   package of your choice (e.g. `ZMCP_TRANSLATION`) → *Pull*. Or create the four
+   classes from [`abap/src`](abap/src) manually in ADT (activate SAPscript + API together).
 2. **SICF service** `/sap/bc/zmcp_transl` with handler `ZCL_MCP_TRANSL_HTTP` –
    2 minutes, see [`abap/SETUP.md`](abap/SETUP.md).
 
@@ -74,6 +76,15 @@ Claude Code instead of Desktop: `claude mcp add sap-se63-translation -- node /pa
 5. `sap_upload_translations` – dry run first, then write + transport entry
 
 Or just say: *"Translate package ZMY_PACKAGE into German, transport DEVK900123."*
+
+### What can be translated
+
+| Object | How | Example |
+|---|---|---|
+| CDS `DDLS`, `DDLX`, `SRVD`, DDIC `DTEL` `DOMA` `TABL`, `MSAG`, text pools `CLAS` `PROG` `FUGR`, OTR, UI5 `WAPA` | SE63 text pairs (LXE) | *"Translate package ZRR01 to DE"* |
+| SE71 SAPscript form `FORM` | paragraphs, own logic | *"Translate SE71 form ZMY_FORM to RU"* |
+| SO10 standard text `TEXT` | paragraphs, own logic | *"Translate SO10 text TEST_123 ST from EN to RU"* |
+| Adobe form `SFPF` | only form/interface texts (`TLGS`) | – |
 
 ## Tools
 
@@ -105,6 +116,9 @@ Languages: ISO (`DE`), SAP key (`D`) or LXE (`deDE`).
 - **UI5 apps:** i18n texts appear in SE63 only with the `# SAPUI5 TRANSLATION-KEY` header.
 - **Status:** texts are written; the SE63 object status may show `M` instead of `T`.
 - **Generated objects** (table maintenance function groups) are best left alone.
+- **SAPscript:** SE71 forms (`FORM`) and SO10 texts (`TEXT`) are translated paragraph by paragraph
+  (own logic, see [`abap/SETUP.md`](abap/SETUP.md)). Form descriptions are not translated.
+- **Adobe forms (SFP):** only the form/interface texts; layout texts (`PDFB`) are not supported yet.
 - **Long texts** (SE61 documentation) are not covered.
 
 ## License

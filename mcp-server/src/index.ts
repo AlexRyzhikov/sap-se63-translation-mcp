@@ -35,7 +35,12 @@ const scopeShape = {
   include_subpackages: z.boolean().optional().describe("Also take objects of all sub-packages (default false)"),
   transport: z.string().optional().describe("Transport request; all objects of the request and its tasks"),
   objects: z
-    .array(z.object({ object: z.string().describe("R3TR type, e.g. DDLS, DDLX, DTEL, MSAG, CLAS, WAPA"), obj_name: z.string() }))
+    .array(
+      z.object({
+        object: z.string().describe("R3TR type, e.g. DDLS, DDLX, DTEL, MSAG, CLAS, WAPA, SFPF; FORM = SE71 SAPscript form, TEXT = SO10 standard text"),
+        obj_name: z.string().describe("Object name. TEXT: text name, optionally with text ID 'ZMY_TEXT,ST' (default ST)"),
+      }),
+    )
     .optional()
     .describe("Explicit R3TR objects"),
   object_types: z.array(z.string()).optional().describe("Filter by R3TR type, e.g. [\"DDLS\",\"DDLX\",\"MSAG\"]"),
@@ -444,7 +449,9 @@ Translation rules:
 - Use the SAP terminology of the module (QM: Prüflos/inspection lot, Merkmal/characteristic, Meldung/notification ...).
 - texttype hints: XFLD/XTIT field label/title, XBUT button, XMSG/MESS message, XTOL tooltip, YINS instruction.
 - Field labels: short, no sentence. Messages: full sentence, same tone as source.
-- Upper-case-only fields: write in upper case.`,
+- Upper-case-only fields: write in upper case.
+- SAPscript (object FORM = SE71, TEXT = SO10): one item = one paragraph, max_len 0 = no limit (lines are re-wrapped in SAP).
+  Keep symbols &VBDKA-VBELN& / &PAGE(3)&, character formats <B>…</> and tabs ,, exactly; texttype = paragraph format.`,
         },
       },
     ],

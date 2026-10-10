@@ -5,6 +5,8 @@
 "!   LXE_OBJ_TRANSLATION_STATUS2    status of one translation object
 "!   LXE_OBJ_TEXT_PAIR_READ/WRITE   read / write text pairs (source + target)
 "!   LXE_OBJ_CREATE_TRANSPORT_ENTRY transport entries for written translations
+"! SAPscript long texts (R3TR FORM = SE71, R3TR TEXT = SO10) are not text pairs;
+"! they are handled by ZCL_MCP_TRANSL_SAPSCRIPT (one paragraph = one text).
 "!
 "! Actions (called by ZCL_MCP_TRANSL_HTTP):
 "!   ping | list_objects | status | read_texts | write_texts
@@ -190,6 +192,14 @@ CLASS zcl_mcp_transl_api DEFINITION
       RETURNING VALUE(rv_task) TYPE trkorr
       RAISING   zcx_mcp_transl.
 
+    "! LXE (deDE), ISO (DE) or SAP key (D) -> SAP key
+    METHODS to_spras
+      IMPORTING iv_lang         TYPE csequence
+      RETURNING VALUE(rv_spras) TYPE spras
+      RAISING   zcx_mcp_transl.
+
+    DATA mo_scr TYPE REF TO zcl_mcp_transl_sapscript.
+
 ENDCLASS.
 
 
@@ -198,6 +208,8 @@ CLASS zcl_mcp_transl_api IMPLEMENTATION.
 
   METHOD handle.
     DATA ls_req TYPE ty_request.
+
+    mo_scr = NEW #( ).
 
     IF iv_body IS NOT INITIAL.
       /ui2/cl_json=>deserialize(
@@ -343,6 +355,14 @@ CLASS zcl_mcp_transl_api IMPLEMENTATION.
                       obj_name = to_upper( ls_obj-obj_name ) ) TO rt_objects.
     ENDLOOP.
 
+    " SO10 texts: 'ZNAME' / transport key 'TEXT,ZNAME,ST,E' -> 'ZNAME,ST'
+    " (other text objects, e.g. R3TR TEXT of document texts, are not supported)
+    LOOP AT rt_objects ASSIGNING FIELD-SYMBOL(<ls_txt>) WHERE object = 'TEXT'.
+      <ls_txt>-obj_name = zcl_mcp_transl_sapscript=>normalize_name( iv_object = <ls_txt>-object
+                                                                    iv_name   = <ls_txt>-obj_name ).
+    ENDLOOP.
+    DELETE rt_objects WHERE object = 'TEXT' AND obj_name IS INITIAL.
+
     " Filter by object type
     IF is_req-object_types IS NOT INITIAL.
       lt_types = VALUE #( FOR t IN is_req-object_types ( sign = 'I' option = 'EQ' low = to_upper( t ) ) ).
@@ -367,6 +387,33 @@ CLASS zcl_mcp_transl_api IMPLEMENTATION.
 
     CLEAR et_lxe.
     LOOP AT it_objects INTO DATA(ls_obj).
+      " SAPscript long texts: no LXE objects, handled by ZCL_MCP_TRANSL_SAPSCRIPT
+      IF zcl_mcp_transl_sapscript=>is_sapscript( ls_obj-object ) = abap_true.
+        IF mo_scr->exists( iv_object = ls_obj-object iv_name = ls_obj-obj_name ) = abap_false.
+          APPEND |{ ls_obj-object } { ls_obj-obj_name }: not found in client { sy-mandt }| &&
+                 COND string( WHEN ls_obj-object = 'FORM' THEN ` (SAP standard forms are often only in client 000)` )
+                 TO ct_messages.
+          CONTINUE.
+        ENDIF.
+        DATA(lv_orig) = mo_scr->orig_lang( iv_object = ls_obj-object iv_name = ls_obj-obj_name ).
+        DATA lv_orig_lxe TYPE lxeisolang.
+        CLEAR lv_orig_lxe.
+        IF lv_orig IS NOT INITIAL.
+          TRY.
+              lv_orig_lxe = to_lxe_lang( CONV #( lv_orig ) ).
+            CATCH zcx_mcp_transl.
+              CLEAR lv_orig_lxe.
+          ENDTRY.
+        ENDIF.
+        APPEND VALUE #( pgmid     = ls_obj-pgmid
+                        object    = ls_obj-object
+                        obj_name  = ls_obj-obj_name
+                        objtype   = ls_obj-object
+                        objname   = ls_obj-obj_name
+                        orig_lang = lv_orig_lxe ) TO et_lxe.
+        CONTINUE.
+      ENDIF.
+
       CLEAR lt_colob.
       lv_objname = ls_obj-obj_name.
       CALL FUNCTION 'LXE_OBJ_EXPAND_TRANSPORT_OBJ'
@@ -382,6 +429,11 @@ CLASS zcl_mcp_transl_api IMPLEMENTATION.
           OTHERS          = 3.
       IF sy-subrc <> 0.
         APPEND |{ ls_obj-object } { ls_obj-obj_name }: not translatable (expand rc={ sy-subrc })| TO ct_messages.
+        CONTINUE.
+      ENDIF.
+      IF lt_colob IS INITIAL.
+        APPEND |{ ls_obj-object } { ls_obj-obj_name }: no SE63 translation objects (inactive, no texts, or long text type)|
+               TO ct_messages.
         CONTINUE.
       ENDIF.
 
@@ -431,20 +483,28 @@ CLASS zcl_mcp_transl_api IMPLEMENTATION.
         ENDIF.
 
         CLEAR lv_stattrn.
-        CALL FUNCTION 'LXE_OBJ_TRANSLATION_STATUS2'
-          EXPORTING
-            t_lang  = lv_t_lang
-            s_lang  = lv_s_lang
-            custmnr = ls_lxe-custmnr
-            objtype = ls_lxe-objtype
-            objname = ls_lxe-objname
-          IMPORTING
-            stattrn = lv_stattrn
-          EXCEPTIONS
-            OTHERS  = 1.
-        IF sy-subrc <> 0.
-          APPEND |{ ls_lxe-objtype } { ls_lxe-objname }: status not readable| TO rs_resp-messages.
-          CONTINUE.
+        IF zcl_mcp_transl_sapscript=>is_sapscript( ls_lxe-object ) = abap_true.
+          " SAPscript: T = target language version exists (no paragraph check)
+          lv_stattrn = COND #( WHEN mo_scr->has_language( iv_object = ls_lxe-object
+                                                          iv_name   = ls_lxe-obj_name
+                                                          iv_spras  = to_spras( lv_t_lang ) ) = abap_true
+                               THEN 'T' ELSE 'N' ).
+        ELSE.
+          CALL FUNCTION 'LXE_OBJ_TRANSLATION_STATUS2'
+            EXPORTING
+              t_lang  = lv_t_lang
+              s_lang  = lv_s_lang
+              custmnr = ls_lxe-custmnr
+              objtype = ls_lxe-objtype
+              objname = ls_lxe-objname
+            IMPORTING
+              stattrn = lv_stattrn
+            EXCEPTIONS
+              OTHERS  = 1.
+          IF sy-subrc <> 0.
+            APPEND |{ ls_lxe-objtype } { ls_lxe-objname }: status not readable| TO rs_resp-messages.
+            CONTINUE.
+          ENDIF.
         ENDIF.
 
         APPEND VALUE #( object      = ls_lxe-object
@@ -463,8 +523,10 @@ CLASS zcl_mcp_transl_api IMPLEMENTATION.
 
 
   METHOD read_texts.
-    DATA lt_lxe   TYPE tt_lxe_obj.
-    DATA lt_pairs TYPE STANDARD TABLE OF lxe_pcx_s1.
+    DATA lt_lxe     TYPE tt_lxe_obj.
+    DATA lt_pairs   TYPE STANDARD TABLE OF lxe_pcx_s1.
+    DATA lt_scr     TYPE zcl_mcp_transl_sapscript=>tt_pair.
+    DATA lt_scr_msg TYPE string_table.
 
     IF is_req-target_lang IS INITIAL.
       RAISE EXCEPTION TYPE zcx_mcp_transl EXPORTING iv_text = `Give target_lang`.
@@ -484,6 +546,34 @@ CLASS zcl_mcp_transl_api IMPLEMENTATION.
       ENDIF.
       IF lv_s_lang = lv_t_lang.
         CONTINUE. " object is maintained in the target language itself
+      ENDIF.
+
+      " SAPscript long texts (SE71 / SO10): one paragraph = one text, no max. length
+      IF zcl_mcp_transl_sapscript=>is_sapscript( ls_lxe-object ) = abap_true.
+        mo_scr->read_pairs( EXPORTING iv_object   = ls_lxe-object
+                                      iv_name     = ls_lxe-obj_name
+                                      iv_s_lang   = to_spras( lv_s_lang )
+                                      iv_t_lang   = to_spras( lv_t_lang )
+                            IMPORTING et_pairs    = lt_scr
+                                      et_messages = lt_scr_msg ).
+        APPEND LINES OF lt_scr_msg TO rs_resp-messages.
+        LOOP AT lt_scr INTO DATA(ls_scr).
+          IF is_req-only_missing = abap_true AND ls_scr-target IS NOT INITIAL.
+            CONTINUE.
+          ENDIF.
+          APPEND VALUE #( object      = ls_lxe-object
+                          obj_name    = ls_lxe-obj_name
+                          objtype     = ls_lxe-objtype
+                          objname     = ls_lxe-objname
+                          source_lang = CONV #( lv_s_lang )
+                          target_lang = CONV #( lv_t_lang )
+                          textkey     = ls_scr-textkey
+                          texttype    = ls_scr-texttype
+                          max_len     = 0
+                          source      = ls_scr-source
+                          target      = ls_scr-target ) TO rs_resp-texts.
+        ENDLOOP.
+        CONTINUE.
       ENDIF.
 
       CLEAR lt_pairs.
@@ -574,6 +664,55 @@ CLASS zcl_mcp_transl_api IMPLEMENTATION.
     ENDLOOP.
     SORT lt_texts BY custmnr objtype objname source_lang target_lang textkey.
 
+    " ---- SAPscript long texts (SE71 forms, SO10 texts): whole text per object and language
+    DATA lt_scr_texts TYPE tt_text.
+    DATA lt_scr_pairs TYPE zcl_mcp_transl_sapscript=>tt_pair.
+    DATA lt_scr_res   TYPE zcl_mcp_transl_sapscript=>tt_result.
+    DATA lt_scr_msg   TYPE string_table.
+    DATA ls_scr_e071  TYPE e071.
+
+    lt_scr_texts = VALUE #( FOR t IN lt_texts WHERE ( object = 'FORM' OR object = 'TEXT' ) ( t ) ).
+    DELETE lt_texts WHERE object = 'FORM' OR object = 'TEXT'.
+
+    LOOP AT lt_scr_texts INTO DATA(ls_scr_first)
+         GROUP BY ( object   = ls_scr_first-object
+                    obj_name = ls_scr_first-obj_name
+                    s_lang   = ls_scr_first-source_lang
+                    t_lang   = ls_scr_first-target_lang )
+         INTO DATA(ls_scr_grp).
+
+      CLEAR: lt_scr_pairs, lt_scr_res, lt_scr_msg, ls_scr_e071.
+      LOOP AT GROUP ls_scr_grp INTO DATA(ls_scr_text).
+        APPEND VALUE #( textkey = ls_scr_text-textkey target = ls_scr_text-target ) TO lt_scr_pairs.
+      ENDLOOP.
+
+      TRY.
+          mo_scr->write_pairs( EXPORTING iv_object   = ls_scr_grp-object
+                                         iv_name     = ls_scr_grp-obj_name
+                                         iv_s_lang   = to_spras( ls_scr_grp-s_lang )
+                                         iv_t_lang   = to_spras( ls_scr_grp-t_lang )
+                                         it_pairs    = lt_scr_pairs
+                                         iv_dry_run  = is_req-dry_run
+                               IMPORTING et_results  = lt_scr_res
+                                         es_e071     = ls_scr_e071
+                                         et_messages = lt_scr_msg ).
+        CATCH zcx_mcp_transl INTO DATA(lx_scr).
+          LOOP AT lt_scr_pairs INTO DATA(ls_scr_pair).
+            APPEND VALUE #( textkey = ls_scr_pair-textkey result = `error` message = lx_scr->get_text( ) ) TO lt_scr_res.
+          ENDLOOP.
+      ENDTRY.
+
+      LOOP AT lt_scr_res INTO DATA(ls_scr_res).
+        APPEND VALUE #( objtype = ls_scr_grp-object objname = ls_scr_grp-obj_name textkey = ls_scr_res-textkey
+                        result  = ls_scr_res-result message = ls_scr_res-message ) TO rs_resp-results.
+      ENDLOOP.
+      APPEND LINES OF lt_scr_msg TO rs_resp-messages.
+      IF ls_scr_e071 IS NOT INITIAL AND lv_task IS NOT INITIAL.
+        APPEND ls_scr_e071 TO lt_e071.
+      ENDIF.
+    ENDLOOP.
+
+    " ---- LXE short texts (text pairs)
     LOOP AT lt_texts INTO DATA(ls_first)
          GROUP BY ( custmnr = ls_first-custmnr
                     objtype = ls_first-objtype
@@ -701,8 +840,8 @@ CLASS zcl_mcp_transl_api IMPLEMENTATION.
       LOOP AT lt_e071k ASSIGNING FIELD-SYMBOL(<ls_e071k>).
         <ls_e071k>-trkorr = lv_task.
       ENDLOOP.
-      SORT lt_e071 BY pgmid object obj_name.
-      DELETE ADJACENT DUPLICATES FROM lt_e071 COMPARING pgmid object obj_name.
+      SORT lt_e071 BY pgmid object obj_name lang.
+      DELETE ADJACENT DUPLICATES FROM lt_e071 COMPARING pgmid object obj_name lang.
 
       CALL FUNCTION 'TRINT_APPEND_COMM'
         EXPORTING
@@ -776,6 +915,32 @@ CLASS zcl_mcp_transl_api IMPLEMENTATION.
       RAISE EXCEPTION TYPE zcx_mcp_transl
         EXPORTING iv_text = |Language '{ lv_in }' is not a translation language in this system|.
     ENDIF.
+  ENDMETHOD.
+
+
+  METHOD to_spras.
+    DATA lv_laiso TYPE laiso.
+    DATA(lv_in) = condense( CONV string( iv_lang ) ).
+
+    CASE strlen( lv_in ).
+      WHEN 1.
+        rv_spras = lv_in.
+      WHEN 2 OR 4.                     " DE or deDE -> ISO part -> D
+        lv_laiso = to_upper( substring( val = lv_in len = 2 ) ).
+        CALL FUNCTION 'CONVERSION_EXIT_ISOLA_INPUT'
+          EXPORTING
+            input            = lv_laiso
+          IMPORTING
+            output           = rv_spras
+          EXCEPTIONS
+            unknown_language = 1
+            OTHERS           = 2.
+        IF sy-subrc <> 0.
+          RAISE EXCEPTION TYPE zcx_mcp_transl EXPORTING iv_text = |Unknown language '{ lv_in }'|.
+        ENDIF.
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zcx_mcp_transl EXPORTING iv_text = |Language '{ lv_in }' not valid|.
+    ENDCASE.
   ENDMETHOD.
 
 
