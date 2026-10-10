@@ -16,7 +16,7 @@ One transport request with these objects is everything the SAP side needs:
 | `R3TR CLAS` | `ZCL_MCP_TRANSL_SAPSCRIPT` – SE71 / SO10 | `src/zcl_mcp_transl_sapscript.clas.*` |
 | `R3TR CLAS` | `ZCL_MCP_TRANSL_API` – SE63 / LXE + routing | `src/zcl_mcp_transl_api.clas.*` |
 | `R3TR CLAS` | `ZCL_MCP_TRANSL_HTTP` – ICF handler | `src/zcl_mcp_transl_http.clas.*` |
-| `R3TR SICF` | `/sap/bc/zmcp_transl` | not in abapGit – create it by hand (step 2) |
+| `R3TR SICF` | `/sap/bc/zmcp_transl` | not in abapGit – create it by hand (step 2); included in `../transport` |
 
 The class sources in `src/` are the active versions from the reference system (release 816);
 SAP returns them with CRLF line endings, the repo stores LF – the content is the same.
