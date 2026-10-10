@@ -5,6 +5,22 @@ Target: S/4HANA 2023 (ABAP Platform 7.58) on-premise. Works on 7.50+ in principl
 
 Tested on ABAP Platform 2025 (SAP ABAP Cloud Developer Trial, release 816).
 
+## Objects of the solution
+
+One transport request with these objects is everything the SAP side needs:
+
+| Object | Name | In this repo |
+|---|---|---|
+| `R3TR DEVC` | development package (e.g. `ZMCP_TRANSLATION`) | `src/package.devc.xml` |
+| `R3TR CLAS` | `ZCX_MCP_TRANSL` – exception | `src/zcx_mcp_transl.clas.*` |
+| `R3TR CLAS` | `ZCL_MCP_TRANSL_SAPSCRIPT` – SE71 / SO10 | `src/zcl_mcp_transl_sapscript.clas.*` |
+| `R3TR CLAS` | `ZCL_MCP_TRANSL_API` – SE63 / LXE + routing | `src/zcl_mcp_transl_api.clas.*` |
+| `R3TR CLAS` | `ZCL_MCP_TRANSL_HTTP` – ICF handler | `src/zcl_mcp_transl_http.clas.*` |
+| `R3TR SICF` | `/sap/bc/zmcp_transl` | not in abapGit – create it by hand (step 2) |
+
+The class sources in `src/` are the active versions from the reference system (release 816);
+SAP returns them with CRLF line endings, the repo stores LF – the content is the same.
+
 ## 1. Create the objects
 
 Package suggestion: `ZMCP_TRANSLATION` – a **development** package (a structure package
