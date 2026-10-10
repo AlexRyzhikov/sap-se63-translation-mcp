@@ -59,7 +59,16 @@ Then quit Claude Desktop completely and start it again → *"Ping SAP"*.
 
 Claude Code instead of Desktop: `claude mcp add sap-se63-translation -- node /path/to/mcp-server/dist/index.js`
 
-### SAP side (once per system)
+### SAP side (once per system) – choose one way
+
+**A) Transport files (easiest, no abapGit):** download [`transport/`](transport) –
+`K900167.A4H` → `/usr/sap/trans/cofiles`, `R900167.A4H` → `/usr/sap/trans/data` →
+STMS: add request `A4HK900167` to the import queue → import (*Ignore Invalid Component Version*,
+*Overwrite Originals*) → **activate** the service `/sap/bc/zmcp_transl` in SICF.
+Contains the package `ZMCP_TRANSLATION`, all 4 classes and the ICF service.
+Step by step: [`transport/README.md`](transport/README.md).
+
+**B) abapGit (if you want to change the code):**
 
 1. **ABAP classes** – with [abapGit](https://abapgit.org): *New Online* → this repo →
    package of your choice (e.g. `ZMCP_TRANSLATION`) → *Pull*. Or create the four

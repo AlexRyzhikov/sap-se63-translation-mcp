@@ -27,7 +27,13 @@ Package suggestion: `ZMCP_TRANSLATION` – a **development** package (a structur
 cannot hold classes). Usually the DEV system is enough: translation is done in DEV and
 transported.
 
-### Option A – abapGit (recommended)
+### Option 0 – transport files (no abapGit)
+
+Import the released request from [`../transport`](../transport/README.md) with STMS. It contains
+package `ZMCP_TRANSLATION`, all four classes **and** the SICF node – then only activate the service in
+SICF (step 2, point 5) and check the authorizations (step 3).
+
+### Option A – abapGit (recommended for development)
 
 1. Install [abapGit](https://docs.abapgit.org/user-guide/getting-started/install.html) if needed.
 2. abapGit → *New Online* → URL of this repository → package `ZMCP_TRANSLATION` → *Create Online Repo*.

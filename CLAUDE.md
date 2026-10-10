@@ -40,7 +40,8 @@ When the user asks you to **install** it, follow these steps exactly.
 8. **Finish:** tell the user to quit Claude Desktop completely and restart it, then say *"Ping SAP"*.
    For Claude Code: `claude mcp add sap-se63-translation -- "$(which node)" "$PWD/dist/index.js"`.
 
-The **SAP side** (4 ABAP classes + 1 SICF node) is described in `abap/SETUP.md`.
+The **SAP side** (4 ABAP classes + 1 SICF node) is described in `abap/SETUP.md`. Easiest for the user:
+import the transport files in `transport/` (see `transport/README.md`), then activate the SICF service.
 Ask the user whether it is already installed before debugging connection errors.
 
 ## Using the tools (translation work)
