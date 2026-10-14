@@ -12,10 +12,10 @@
     "build": "tsc",
     "setup": "node dist/setup.js",
     "start": "node dist/index.js",
-    "test": "npm run build && node test/e2e.mjs && node test/setup.mjs"
+    "test": "npm run build && node test/e2e.mjs && node test/auth.mjs && node test/setup.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.15.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

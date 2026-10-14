@@ -3,15 +3,19 @@
  * Setup wizard:  npm run setup  [-- --url https://host:44300 --client 100 --user MYUSER ...]
  *
  *  1. asks for the connection data (or takes it from flags)      -> writes mcp-server/.env (no password!)
- *  2. stores the password in the OS keychain (macOS)             -> asked by the OS, never shown, never in a file
+ *  2. stores the password: macOS keychain, or Windows DPAPI via  -> asked by the OS, never shown, never in a file
+ *     scripts/windows-password.ps1, or your password manager
  *  3. tests the connection (ping)
  *  4. registers the server in Claude Desktop                     -> merges claude_desktop_config.json (with backup)
+ *
+ * On Windows run it as `node dist/setup.js [options]`: npm.ps1 swallows the `--`, so
+ * `npm run setup -- --yes ...` loses every flag.
  *
  * Non-interactive (e.g. when Claude runs it): pass all flags plus --yes. The password step is then
  * skipped and the exact keychain command is printed for the user to run in their own terminal.
  */
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -44,6 +48,9 @@ const interactive = process.stdin.isTTY && !flags.yes;
 if (flags.help) {
   console.log(`Usage: npm run setup [-- options]
 
+  In PowerShell call it as  node dist/setup.js [options]  – npm.ps1 eats the "--",
+  so "npm run setup -- --yes ..." silently loses every flag and prompts instead.
+
   --url <https://host:port>   SAP system (HTTPS port from SMICM > Services)
   --client <nnn>              SAP client
   --user <USER>               SAP user
@@ -52,6 +59,7 @@ if (flags.help) {
   --worklist-dir <path>       where worklists are stored (default ~/sap-translation-worklists)
   --service-path <path>       ICF path (default /sap/bc/zmcp_transl)
   --no-claude                 do not touch the Claude Desktop config
+  --no-system-ca              Windows: do not add NODE_OPTIONS=--use-system-ca to the entry
   --no-test                   skip the connection test
   --yes                       non-interactive: take flags / existing .env, never prompt
 `);
@@ -60,14 +68,33 @@ if (flags.help) {
 
 /* ---------- helpers ---------- */
 
+/** Same rule as config.ts: only a matched pair of quotes is stripped, never a lone trailing one. */
+function unquote(value: string): string {
+  const v = value.trimEnd();
+  const q = v[0];
+  return v.length >= 2 && (q === '"' || q === "'") && v.endsWith(q) ? v.slice(1, -1) : v;
+}
+
 function readEnv(file: string): Record<string, string> {
   const out: Record<string, string> = {};
   if (!existsSync(file)) return out;
   for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i);
-    if (m && !line.trim().startsWith("#")) out[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    if (m && !line.trim().startsWith("#")) out[m[1]] = unquote(m[2]);
   }
   return out;
+}
+
+/** Minimum Node: 22.15 is where --use-system-ca appeared, and Node 20 is end-of-life. */
+function nodeTooOld(): string | undefined {
+  const [maj, min] = process.versions.node.split(".").map(Number);
+  if (maj > 22 || (maj === 22 && min >= 15)) return undefined;
+  return (
+    `Node ${process.versions.node} is too old – this server needs Node >= 22.15.\n` +
+    `      Node 20 is end-of-life (April 2026), and --use-system-ca, which lets Node trust\n` +
+    `      your company CA from the OS store, only exists from 22.15 on.\n` +
+    `      Windows: winget install OpenJS.NodeJS.LTS   macOS: brew install node   Linux: see nodejs.org`
+  );
 }
 
 const rl = interactive ? createInterface({ input: process.stdin, output: process.stdout }) : undefined;
@@ -80,12 +107,29 @@ const ok = (m: string) => console.log(`  ✔ ${m}`);
 const warn = (m: string) => console.log(`  ⚠ ${m}`);
 const step = (m: string) => console.log(`\n${m}`);
 
+/**
+ * Where Claude Desktop keeps claude_desktop_config.json.
+ *
+ * Windows has two possible locations. Installed from the Microsoft Store / as an MSIX
+ * package, the app's %APPDATA% is virtualised into the package container, so it never
+ * reads plain %APPDATA%\Claude – writing there "succeeds" and nothing happens. Prefer a
+ * package folder that actually exists, and fall back to %APPDATA% for the plain installer.
+ */
 function claudeConfigPath(): string {
   switch (platform()) {
     case "darwin":
       return join(homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
-    case "win32":
-      return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Claude", "claude_desktop_config.json");
+    case "win32": {
+      const roaming = process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
+      const packages = join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "Packages");
+      if (existsSync(packages)) {
+        for (const pkg of readdirSync(packages).filter((d) => d.startsWith("Claude"))) {
+          const dir = join(packages, pkg, "LocalCache", "Roaming", "Claude");
+          if (existsSync(dir)) return join(dir, "claude_desktop_config.json");
+        }
+      }
+      return join(roaming, "Claude", "claude_desktop_config.json");
+    }
     default:
       return join(homedir(), ".config", "Claude", "claude_desktop_config.json");
   }
@@ -95,6 +139,11 @@ function claudeConfigPath(): string {
 
 async function main() {
   console.log("SAP SE63 translation MCP server – setup");
+  const old = nodeTooOld();
+  if (old) {
+    console.error(`\n✖ ${old}`);
+    process.exit(1);
+  }
   if (!existsSync(entryFile)) {
     console.error(`\n✖ ${entryFile} not found. Run "npm run build" first.`);
     process.exit(1);
@@ -118,8 +167,15 @@ async function main() {
     process.exit(1);
   }
 
+  // Windows has no OS keychain for us to fall back on, so point SAP_PASSWORD_CMD at the
+  // bundled DPAPI helper – unless the user already configured a password manager.
+  const winHelper = join(projectDir, "scripts", "windows-password.ps1");
+  const passwordCmd =
+    cur.SAP_PASSWORD_CMD ??
+    (platform() === "win32" ? `pwsh -NoProfile -ExecutionPolicy Bypass -File "${winHelper}"` : undefined);
+
   const env = [
-    "# Written by `npm run setup`. No password here – it lives in the OS keychain.",
+    "# Written by `npm run setup`. No password here – it lives in the OS keychain / DPAPI store.",
     `SAP_URL=${url}`,
     `SAP_CLIENT=${client}`,
     `SAP_USER=${user}`,
@@ -127,7 +183,7 @@ async function main() {
     `SAP_SERVICE_PATH=${servicePath}`,
     `SAP_ALLOW_SELF_SIGNED=${selfSigned}`,
     `WORKLIST_DIR=${worklistDir}`,
-    ...(cur.SAP_PASSWORD_CMD ? [`SAP_PASSWORD_CMD=${cur.SAP_PASSWORD_CMD}`] : []),
+    ...(passwordCmd ? [`SAP_PASSWORD_CMD=${passwordCmd}`] : []),
     ...(cur.SAP_KEYCHAIN_SERVICE ? [`SAP_KEYCHAIN_SERVICE=${cur.SAP_KEYCHAIN_SERVICE}`] : []),
     "",
   ].join("\n");
@@ -152,6 +208,20 @@ async function main() {
       r.status === 0 ? ok("password stored in the macOS keychain") : warn(`keychain command failed – run it yourself:\n      ${keychainCmd}`);
     } else {
       warn(`run this in YOUR terminal (it asks for the password, hidden):\n      ${keychainCmd}`);
+    }
+  } else if (platform() === "win32") {
+    ok("SAP_PASSWORD_CMD set to scripts\\windows-password.ps1 (encrypted with Windows DPAPI)");
+    const store = join(process.env.APPDATA ?? "", "sap-se63-mcp", `${user}.pwd`);
+    if (existsSync(store)) {
+      ok(`password already stored for ${user} (${store})`);
+    } else {
+      warn(
+        "store the password once in YOUR PowerShell window (input is hidden):\n" +
+          `      pwsh -NoProfile -File "${winHelper}" -Store -User ${user}\n` +
+          "      no pwsh?  winget install Microsoft.PowerShell  – Windows PowerShell 5.1 cannot read a\n" +
+          "      SecureString back under AppLocker (Constrained Language Mode).\n" +
+          "      A password manager works just as well, e.g. SAP_PASSWORD_CMD=op read op://Private/SAP/password",
+      );
     }
   } else {
     warn(
@@ -180,7 +250,15 @@ async function main() {
   // 4. Claude Desktop
   step("4/4 Claude Desktop");
   const cfgPath = claudeConfigPath();
-  const entry = { command: process.execPath, args: [entryFile] };
+  // Claude Desktop starts the server directly, not through a shell, so it inherits no
+  // NODE_OPTIONS. On Windows the company CA sits in the OS store, which Node reads only
+  // with --use-system-ca – without it every call fails with UNABLE_TO_GET_ISSUER_CERT_LOCALLY.
+  const useSystemCa = platform() === "win32" && flags["no-system-ca"] !== true;
+  const entry = {
+    command: process.execPath,
+    args: [entryFile],
+    ...(useSystemCa ? { env: { NODE_OPTIONS: "--use-system-ca" } } : {}),
+  };
   if (flags["no-claude"] === true) {
     warn("skipped (--no-claude). Add this to claude_desktop_config.json → mcpServers:");
     console.log(JSON.stringify({ [SERVER_NAME]: entry }, null, 2));

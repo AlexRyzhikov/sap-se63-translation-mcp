@@ -31,7 +31,8 @@ terminal / the macOS keychain dialog – never into the chat.**
 
 ## Manual install
 
-Requirements: Node.js ≥ 20, git, an SAP system (S/4HANA / ABAP Platform ≥ 7.50).
+Requirements: **Node.js ≥ 22.15**, git, an SAP system (S/4HANA / ABAP Platform ≥ 7.50).
+(Node 20 is end-of-life, and `--use-system-ca` – the clean way to trust a company CA – starts at 22.15.)
 
 ```bash
 git clone https://github.com/AlexRyzhikov/sap-se63-translation-mcp.git
@@ -47,7 +48,7 @@ npm run setup       # asks connection data, stores password, tests, registers in
 | Step | What | Where |
 |---|---|---|
 | 1 | URL, client, user, language, certificates | `mcp-server/.env` (no password) |
-| 2 | password | macOS keychain (hidden input). Other OS: `SAP_PASSWORD_CMD` |
+| 2 | password | macOS keychain (hidden input). Windows: DPAPI helper. Other OS: `SAP_PASSWORD_CMD` |
 | 3 | connection test (`ping`) | – |
 | 4 | register the server | `claude_desktop_config.json` (merged, backup `.bak`) |
 
@@ -55,9 +56,46 @@ Non-interactive (scripts, Claude):
 `npm run setup -- --yes --url https://host:44300 --client 100 --user MYUSER`
 (`--self-signed` for local systems, `--no-claude` to skip step 4, `--help` for all options).
 
+> **PowerShell:** call `node dist/setup.js --yes --url … --client … --user …` instead.
+> `npm.ps1` swallows the `--`, so `npm run setup -- --yes …` loses every flag and prompts anyway.
+
 Then quit Claude Desktop completely and start it again → *"Ping SAP"*.
 
 Claude Code instead of Desktop: `claude mcp add sap-se63-translation -- node /path/to/mcp-server/dist/index.js`
+
+### Windows
+
+Three things differ on Windows, and `npm run setup` handles all of them:
+
+1. **Password.** There is no keychain to use, so setup points `SAP_PASSWORD_CMD` at
+   [`scripts/windows-password.ps1`](mcp-server/scripts/windows-password.ps1), which keeps the
+   password encrypted with Windows DPAPI – readable only by your Windows user on that machine.
+   Store it once in your own terminal (input is hidden):
+   ```powershell
+   pwsh -NoProfile -File .\scripts\windows-password.ps1 -Store -User MYUSER
+   ```
+   It needs **PowerShell 7** (`winget install Microsoft.PowerShell`). Windows PowerShell 5.1 cannot
+   turn a `SecureString` back into text on a managed machine: AppLocker / WDAC put it in
+   *Constrained Language Mode*, where the required .NET calls are blocked – such a script exits 0
+   and prints nothing, which looks exactly like a wrong password. The helper uses cmdlets only.
+   A password manager works as well: `SAP_PASSWORD_CMD=op read op://Private/SAP/password`.
+
+2. **Company certificate.** Node has its own CA list and ignores the Windows certificate store, so
+   the SAP system your browser trusts still fails with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`. Setup
+   therefore adds `"env": { "NODE_OPTIONS": "--use-system-ca" }` to the Claude Desktop entry
+   (`--no-system-ca` to opt out). Outside Claude, export it yourself before testing:
+   ```powershell
+   $env:NODE_OPTIONS = "--use-system-ca"
+   ```
+   `NODE_EXTRA_CA_CERTS` also works, but it must point at a PEM **file** – a directory is ignored
+   with an obscure I/O warning. Do **not** reach for `SAP_ALLOW_SELF_SIGNED=true` here: a company CA
+   is not a self-signed certificate, and that switch turns checking off altogether.
+
+3. **Claude Desktop config location.** Installed from the Microsoft Store (MSIX), the app's
+   `%APPDATA%` is virtualised, so it never reads `%APPDATA%\Claude\claude_desktop_config.json`.
+   Setup detects the package folder
+   (`%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`) and writes there. The in-app
+   path is always *Settings → Developer → Edit Config*.
 
 ### SAP side (once per system) – choose one way
 
@@ -112,11 +150,17 @@ Languages: ISO (`DE`), SAP key (`D`) or LXE (`deDE`).
 
 ## Security
 
-- No password in any file. macOS keychain, or `SAP_PASSWORD_CMD` (1Password CLI, `secret-tool`, …).
+- No password in any file. macOS keychain, Windows DPAPI, or `SAP_PASSWORD_CMD` (1Password CLI, `secret-tool`, …).
 - The ICF handler checks `S_TCODE` = `SE63`; SE63's own authorizations apply.
-- `SAP_ALLOW_SELF_SIGNED=true` only for local/test systems. Better: `NODE_EXTRA_CA_CERTS=/path/ca.pem`.
+- Company CA: `NODE_OPTIONS=--use-system-ca` (Node ≥ 22.15) or `NODE_EXTRA_CA_CERTS=/path/ca.pem` (a file, not a directory).
+  `SAP_ALLOW_SELF_SIGNED=true` only for local/test systems – it switches certificate checking off.
 
 ## Notes / limits
+
+- **A rejected logon is not always a 401.** When the ICF service falls back to form-based logon –
+  what happens with an expired password – SAP answers **HTTP 200 with its HTML logon page**. The
+  server recognises that page and says so; check SU01 → *Logon Data* first (log on once in SAP GUI),
+  then SICF → *Logon Data* → "Basic Authentication".
 
 - **Original language matters.** SE63 translates *from* the object's original language.
   Objects created with logon language EN but German texts will show German as "English".
