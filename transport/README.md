@@ -52,3 +52,8 @@ Exported from ABAP Platform release 816 (SAP ABAP Cloud Developer Trial).
 - **Older releases:** the classes use ABAP 7.50+ syntax. A transport from release 816 into a much older
   release is not guaranteed by SAP – if the import fails there, use **abapGit** with `../abap/src` instead.
 - abapGit (`../abap/src`) is also the better way if you want to develop the classes further.
+- **Fix not yet in this transport:** `ZCL_MCP_TRANSL_API->WRITE_TEXTS` now writes *all* translated pairs
+  of an object (see `../abap/src`). The transport files still contain the older version, which wrote
+  only the changed pairs – for text pools (`RPT8`, class/program text symbols) LXE then replaced the whole
+  target text pool and every other translation of that language was deleted. After importing the
+  transport, apply the change from `../abap/src/zcl_mcp_transl_api.clas.abap` (or pull it with abapGit).
