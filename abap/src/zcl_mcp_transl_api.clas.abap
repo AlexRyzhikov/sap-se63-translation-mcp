@@ -782,6 +782,14 @@ CLASS zcl_mcp_transl_api IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
+      " Write ALL translated pairs of the object, not only the changed ones.
+      " For some object types (e.g. RPT8 = text pool of a class/program) LXE
+      " replaces the whole target text pool with the given pairs: passing only
+      " the changed pairs deleted every other existing translation.
+      " lt_pairs already holds the new texts (<ls_pair>-t_text set above).
+      DATA(lt_write) = lt_pairs.
+      DELETE lt_write WHERE t_text IS INITIAL.
+
       CALL FUNCTION 'LXE_OBJ_TEXT_PAIR_WRITE'
         EXPORTING
           t_lang    = lv_t_lang
@@ -790,7 +798,7 @@ CLASS zcl_mcp_transl_api IMPLEMENTATION.
           objtype   = ls_group-objtype
           objname   = ls_group-objname
         TABLES
-          lt_pcx_s1 = lt_changed
+          lt_pcx_s1 = lt_write
         EXCEPTIONS
           OTHERS    = 1.
       IF sy-subrc <> 0.
